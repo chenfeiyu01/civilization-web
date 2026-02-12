@@ -1,6 +1,7 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
 import { HexCoord, coordKey, UNIT_DISPLAY, UNIT_STATS } from 'shared';
 import { renderHexGrid, hexToPixel, pixelToHex, HexRenderConfig } from '../../game/map/HexRenderer';
+import { animationManager, particleEngine } from '../../game/animation';
 import { useGameStore } from '../../store/gameStore';
 
 interface HexCanvasProps {
@@ -11,6 +12,8 @@ interface HexCanvasProps {
 export default function HexCanvas({ onCellClick, onCellHover }: HexCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const animationFrameRef = useRef<number>(0);
+  const lastTimeRef = useRef<number>(0);
 
   const [config, setConfig] = useState<HexRenderConfig>({
     hexSize: 40,
@@ -34,7 +37,7 @@ export default function HexCanvas({ onCellClick, onCellHover }: HexCanvasProps) 
   const attackableCoords: Set<string> = selectedUnitId ? getAttackableCoords(selectedUnitId) : new Set();
 
   // 绘制地图
-  const draw = useCallback(() => {
+  const draw = useCallback((_time: number = 0) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -54,6 +57,12 @@ export default function HexCanvas({ onCellClick, onCellHover }: HexCanvasProps) 
       attackableCoords,
       highlightedCoords: hoveredCoord ? new Set([coordKey(hoveredCoord)]) : undefined,
     });
+
+    // 绘制粒子（在单位和城市下面）
+    particleEngine.render(ctx);
+
+    // 绘制动画
+    animationManager.render(ctx, config);
 
     // 绘制城市
     cities.forEach((city) => {
@@ -132,6 +141,31 @@ export default function HexCanvas({ onCellClick, onCellHover }: HexCanvasProps) 
     });
   }, [map, units, cities, players, config, selectedUnitId, selectedCityId, movableCoords, attackableCoords, hoveredCoord]);
 
+  // 动画循环
+  useEffect(() => {
+    const animate = (time: number) => {
+      const deltaTime = time - lastTimeRef.current;
+      lastTimeRef.current = time;
+
+      // 更新动画和粒子
+      animationManager.update(deltaTime);
+      particleEngine.update(deltaTime);
+
+      // 绘制
+      draw(time);
+
+      animationFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    animationFrameRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [draw]);
+
   // 处理画布大小变化
   useEffect(() => {
     const handleResize = () => {
@@ -141,18 +175,12 @@ export default function HexCanvas({ onCellClick, onCellHover }: HexCanvasProps) 
 
       canvas.width = container.clientWidth;
       canvas.height = container.clientHeight;
-      draw();
     };
 
     handleResize();
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [draw]);
-
-  // 重新绘制
-  useEffect(() => {
-    draw();
-  }, [draw]);
+  }, []);
 
   // 鼠标点击处理
   const handleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
