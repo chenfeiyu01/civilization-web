@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <polygon points="50,5 95,27.5 95,72.5 50,95 5,72.5 5,27.5" fill="#3B82F6" stroke="#1a1a2e" stroke-width="2"/>
+  <text x="50" y="60" text-anchor="middle" fill="white" font-size="40" font-weight="bold">⚔</text>
+</svg>
