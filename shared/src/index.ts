@@ -2,3 +2,5 @@
 export * from './types/map';
 export * from './types/units';
 export * from './types/game';
+export * from './types/city';
+export * from './types/animation';

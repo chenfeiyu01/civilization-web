@@ -1,12 +1,13 @@
 import { useGameStore } from '../../store/gameStore';
-import { UNIT_STATS, UNIT_DISPLAY } from 'shared';
+import { UNIT_STATS, UNIT_DISPLAY, UnitType } from 'shared';
 
 interface GameInfoPanelProps {
   onEndTurn: () => void;
   onBackToMenu: () => void;
+  onFoundCity: (settlerId: string) => void;
 }
 
-export default function GameInfoPanel({ onEndTurn, onBackToMenu }: GameInfoPanelProps) {
+export default function GameInfoPanel({ onEndTurn, onBackToMenu, onFoundCity }: GameInfoPanelProps) {
   const {
     currentPlayerIndex,
     players,
@@ -15,11 +16,15 @@ export default function GameInfoPanel({ onEndTurn, onBackToMenu }: GameInfoPanel
     selectedUnitId,
     units,
     gameLog,
+    cities,
   } = useGameStore();
 
   const currentPlayer = players[currentPlayerIndex];
   const selectedUnit = selectedUnitId ? units.get(selectedUnitId) : null;
   const unitStats = selectedUnit ? UNIT_STATS[selectedUnit.type] : null;
+
+  // 计算当前玩家的城市数量
+  const playerCities = Array.from(cities.values()).filter(c => c.playerId === currentPlayer?.id);
 
   return (
     <div className="absolute top-4 right-4 w-72 game-panel p-4 z-10">
@@ -37,6 +42,22 @@ export default function GameInfoPanel({ onEndTurn, onBackToMenu }: GameInfoPanel
             AI思考中...
           </div>
         )}
+      </div>
+
+      {/* 帝国信息 */}
+      <div className="mb-4 p-2 bg-game-bg rounded-lg flex justify-around text-center">
+        <div>
+          <div className="text-xl">🏠</div>
+          <div className="text-white font-bold">{playerCities.length}</div>
+          <div className="text-xs text-gray-400">城市</div>
+        </div>
+        <div>
+          <div className="text-xl">⚔️</div>
+          <div className="text-white font-bold">
+            {Array.from(units.values()).filter(u => u.playerId === currentPlayer?.id).length}
+          </div>
+          <div className="text-xs text-gray-400">单位</div>
+        </div>
       </div>
 
       {/* 选中单位信息 */}
@@ -90,6 +111,18 @@ export default function GameInfoPanel({ onEndTurn, onBackToMenu }: GameInfoPanel
             <div className="mt-2 text-sm text-gray-400">
               攻击范围: {unitStats.range}
             </div>
+          )}
+
+          {/* 殖民者建造城市按钮 */}
+          {selectedUnit.type === UnitType.SETTLER && (
+            <button
+              onClick={() => onFoundCity(selectedUnit.id)}
+              className="w-full mt-3 py-2 bg-gradient-to-r from-yellow-600 to-amber-500
+                         hover:from-yellow-500 hover:to-amber-400 text-white font-bold
+                         rounded-lg transition-all shadow-lg hover:shadow-xl"
+            >
+              🏗️ 建造城市
+            </button>
           )}
         </div>
       )}

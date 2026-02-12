@@ -2,6 +2,7 @@ import { useEffect, useCallback } from 'react';
 import HexCanvas from '../HexGrid/HexCanvas';
 import GameInfoPanel from '../UI/GameInfoPanel';
 import VictoryScreen from '../UI/VictoryScreen';
+import CityPanel from '../UI/CityPanel';
 import { useGameStore } from '../../store/gameStore';
 import { HexCoord, coordKey, GamePhase } from 'shared';
 
@@ -16,9 +17,14 @@ export default function GameBoard({ onBackToMenu }: GameBoardProps) {
     moveUnit,
     attackUnit,
     endTurn,
+    foundCity,
+    selectCity,
     getUnitAtCoord,
+    getCityAtCoord,
     selectedUnitId,
+    selectedCityId,
     units,
+    cities,
     players,
     getCurrentPlayer,
     phase,
@@ -40,6 +46,7 @@ export default function GameBoard({ onBackToMenu }: GameBoardProps) {
     if (!currentPlayer || currentPlayer.isAI) return;
 
     const clickedUnit = getUnitAtCoord(coord);
+    const clickedCity = getCityAtCoord(coord);
     const selectedUnit = selectedUnitId ? units.get(selectedUnitId) : null;
 
     // 如果有选中的单位
@@ -62,7 +69,7 @@ export default function GameBoard({ onBackToMenu }: GameBoardProps) {
         }
       }
 
-      // 点击了可移动的空格子
+      // 点击了可移动的空格子（没有单位）
       if (!clickedUnit) {
         const movableCoords = useGameStore.getState().getMovableCoords(selectedUnitId!);
         if (movableCoords.has(coordKey(coord))) {
@@ -85,11 +92,18 @@ export default function GameBoard({ onBackToMenu }: GameBoardProps) {
       return;
     }
 
-    // 没有选中的单位，尝试选择
+    // 没有选中的单位
+    // 检查是否点击了己方城市
+    if (clickedCity && clickedCity.playerId === currentPlayer.id) {
+      selectCity(clickedCity.id);
+      return;
+    }
+
+    // 尝试选择单位
     if (clickedUnit && clickedUnit.playerId === currentPlayer.id) {
       selectUnit(clickedUnit.id);
     }
-  }, [phase, getCurrentPlayer, getUnitAtCoord, selectedUnitId, units, selectUnit, moveUnit, attackUnit, addLog]);
+  }, [phase, getCurrentPlayer, getUnitAtCoord, getCityAtCoord, selectedUnitId, units, selectUnit, moveUnit, attackUnit, addLog, selectCity]);
 
   // 处理鼠标悬停
   const handleCellHover = useCallback((coord: HexCoord | null) => {
@@ -104,10 +118,22 @@ export default function GameBoard({ onBackToMenu }: GameBoardProps) {
     endTurn();
   }, [phase, endTurn, addLog]);
 
+  // 处理建造城市
+  const handleFoundCity = useCallback((settlerId: string) => {
+    const city = foundCity(settlerId);
+    if (city) {
+      // 建造成功后可以选择新城市
+      selectCity(city.id);
+    }
+  }, [foundCity, selectCity]);
+
   // 处理返回菜单
   const handleBackToMenu = useCallback(() => {
     onBackToMenu();
   }, [onBackToMenu]);
+
+  // 获取选中的城市
+  const selectedCity = selectedCityId ? cities.get(selectedCityId) : null;
 
   return (
     <div className="w-full h-full relative overflow-hidden">
@@ -121,7 +147,16 @@ export default function GameBoard({ onBackToMenu }: GameBoardProps) {
       <GameInfoPanel
         onEndTurn={handleEndTurn}
         onBackToMenu={handleBackToMenu}
+        onFoundCity={handleFoundCity}
       />
+
+      {/* 城市面板 */}
+      {selectedCity && (
+        <CityPanel
+          city={selectedCity}
+          onClose={() => selectCity(null)}
+        />
+      )}
 
       {/* 胜利/失败画面 */}
       {phase === GamePhase.GAME_OVER && winner && (

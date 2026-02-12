@@ -11,14 +11,26 @@ import {
   UNIT_STATS,
   hexDistance,
   hexNeighbors,
+  hexesInRange,
   TERRAIN_PROPERTIES,
   CombatResult,
   MoveResult,
+  City,
+  CityResources,
+  ProducableType,
+  PRODUCTION_ITEMS,
+  CITY_NAMES,
+  getGrowthThreshold,
 } from 'shared';
 import { generateMap } from '../game/map/MapGenerator';
 import { executeAITurn } from '../game/ai/SimpleAI';
 
 interface GameStore extends GameState {
+  // 城市状态
+  cities: Map<string, City>;
+  selectedCityId: string | null;
+  usedCityNames: Set<string>;
+
   // 初始化
   initGame: (mapWidth: number, mapHeight: number) => void;
 
@@ -26,6 +38,14 @@ interface GameStore extends GameState {
   selectUnit: (unitId: string | null) => void;
   moveUnit: (unitId: string, to: HexCoord) => MoveResult;
   attackUnit: (attackerId: string, defenderId: string) => CombatResult | null;
+
+  // 城市操作
+  foundCity: (settlerId: string) => City | null;
+  selectCity: (cityId: string | null) => void;
+  addToProductionQueue: (cityId: string, itemType: ProducableType) => void;
+  removeFromProductionQueue: (cityId: string, queueItemId: string) => void;
+  getCityAtCoord: (coord: HexCoord) => City | undefined;
+  getPlayerCities: (playerId: string) => City[];
 
   // 回合操作
   endTurn: () => void;
@@ -112,6 +132,57 @@ function checkGameOver(units: Unit[], players: Player[]): { isOver: boolean; win
   return { isOver: false, winner: null };
 }
 
+// 计算城市资源产出
+function calculateCityResources(coord: HexCoord, map: GameMap): CityResources {
+  const resources: CityResources = { food: 2, production: 2, gold: 1 };
+
+  // 遍历城市周围的格子（半径2）
+  const workableCoords = hexesInRange(coord, 2);
+
+  workableCoords.forEach(c => {
+    const cell = map.cells.get(coordKey(c));
+    if (!cell || cell.cityId) return;
+
+    const terrain = TERRAIN_PROPERTIES[cell.terrain];
+    resources.food += terrain.food;
+    resources.production += terrain.production;
+  });
+
+  return resources;
+}
+
+// 获取可用城市名称
+function getAvailableCityName(usedNames: Set<string>): string {
+  for (const name of CITY_NAMES) {
+    if (!usedNames.has(name)) {
+      return name;
+    }
+  }
+  // 如果所有名称都用完了，生成随机名称
+  return `新城${Math.floor(Math.random() * 1000)}`;
+}
+
+// 查找城市附近空位放置新单位
+function findEmptyAdjacentCoord(cityCoord: HexCoord, state: GameState & { cities: Map<string, City> }): HexCoord | null {
+  const neighbors = hexNeighbors(cityCoord);
+
+  for (const coord of neighbors) {
+    const key = coordKey(coord);
+    const cell = state.map.cells.get(key);
+
+    if (!cell) continue;
+    if (!TERRAIN_PROPERTIES[cell.terrain].passable) continue;
+
+    // 检查是否有单位占据
+    const hasUnit = Array.from(state.units.values()).some(u => coordKey(u.coord) === key);
+    if (hasUnit) continue;
+
+    return coord;
+  }
+
+  return null;
+}
+
 export const useGameStore = create<GameStore>((set, get) => ({
   // 初始状态
   map: { width: 0, height: 0, cells: new Map() },
@@ -127,6 +198,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
   winner: null,
   hoveredCoord: null,
   gameLog: [],
+
+  // 城市状态
+  cities: new Map(),
+  selectedCityId: null,
+  usedCityNames: new Set(),
 
   // 初始化游戏
   initGame: (mapWidth: number, mapHeight: number) => {
@@ -145,6 +221,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
       selectedUnitId: null,
       winner: null,
       gameLog: ['游戏开始！你的回合。'],
+      cities: new Map(),
+      selectedCityId: null,
+      usedCityNames: new Set(),
     });
   },
 
@@ -287,6 +366,70 @@ export const useGameStore = create<GameStore>((set, get) => ({
   // 结束回合
   endTurn: () => {
     const state = get();
+    const currentPlayer = state.getCurrentPlayer();
+
+    // 处理当前玩家的城市生产
+    if (currentPlayer) {
+      const playerCities = Array.from(state.cities.values())
+        .filter(c => c.playerId === currentPlayer.id);
+
+      const newUnits: Unit[] = [];
+      const newCities = new Map(state.cities);
+      const logs: string[] = [];
+
+      playerCities.forEach(city => {
+        // 处理生产队列
+        if (city.productionQueue.length > 0) {
+          const queueItem = city.productionQueue[0];
+          queueItem.progress += city.resources.production;
+
+          if (queueItem.progress >= queueItem.item.cost) {
+            // 生产完成，创建单位
+            const spawnCoord = findEmptyAdjacentCoord(city.coord, state);
+            if (spawnCoord) {
+              const unitType = queueItem.item.type as UnitType;
+              const newUnit: Unit = {
+                id: generateId(),
+                type: unitType,
+                playerId: city.playerId,
+                coord: spawnCoord,
+                health: UNIT_STATS[unitType].maxHealth,
+                movementPoints: UNIT_STATS[unitType].movement,
+                hasAttacked: false,
+                isFortified: false,
+              };
+              newUnits.push(newUnit);
+              logs.push(`${city.name} 完成了 ${queueItem.item.name} 的训练！`);
+            }
+
+            // 移除已完成的项目
+            city.productionQueue.shift();
+          }
+        }
+
+        // 处理人口增长
+        city.growthProgress += city.resources.food;
+        if (city.growthProgress >= getGrowthThreshold(city.population)) {
+          city.population++;
+          city.growthProgress = 0;
+          logs.push(`${city.name} 的人口增长了！`);
+        }
+
+        // 重新计算资源（人口变化可能影响）
+        city.resources = calculateCityResources(city.coord, state.map);
+        newCities.set(city.id, { ...city });
+      });
+
+      // 添加新单位
+      const updatedUnits = new Map(state.units);
+      newUnits.forEach(u => updatedUnits.set(u.id, u));
+
+      // 更新状态
+      set({ cities: newCities, units: updatedUnits });
+
+      // 添加日志
+      logs.forEach(log => get().addLog(log));
+    }
 
     // 切换到下一个玩家
     const nextPlayerIndex = (state.currentPlayerIndex + 1) % state.players.length;
@@ -294,7 +437,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     // 重置所有单位的行动点数和攻击状态
     const newUnits = new Map<string, Unit>();
-    state.units.forEach((unit, id) => {
+    get().units.forEach((unit, id) => {
       newUnits.set(id, {
         ...unit,
         movementPoints: UNIT_STATS[unit.type].movement,
@@ -311,6 +454,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       currentPlayerIndex: nextPlayerIndex,
       turn: newTurn,
       selectedUnitId: null,
+      selectedCityId: null,
       phase: nextPlayer.isAI ? GamePhase.AI_TURN : GamePhase.PLAYER_TURN,
     });
 
@@ -321,6 +465,124 @@ export const useGameStore = create<GameStore>((set, get) => ({
         executeAITurn();
       }, 500);
     }
+  },
+
+  // 建造城市
+  foundCity: (settlerId: string) => {
+    const state = get();
+    const settler = state.units.get(settlerId);
+
+    if (!settler || settler.type !== UnitType.SETTLER) return null;
+
+    // 检查是否已有城市在同一位置
+    const existingCity = Array.from(state.cities.values())
+      .find(c => coordKey(c.coord) === coordKey(settler.coord));
+    if (existingCity) return null;
+
+    // 获取城市名称
+    const cityName = getAvailableCityName(state.usedCityNames);
+
+    // 创建城市
+    const cityId = generateId();
+    const city: City = {
+      id: cityId,
+      name: cityName,
+      playerId: settler.playerId,
+      coord: settler.coord,
+      population: 1,
+      resources: calculateCityResources(settler.coord, state.map),
+      productionQueue: [],
+      isCapital: !Array.from(state.cities.values())
+        .some(c => c.playerId === settler.playerId),
+      growthProgress: 0,
+    };
+
+    // 更新状态
+    const newCities = new Map(state.cities);
+    newCities.set(cityId, city);
+
+    // 更新地图单元格
+    const cellKey = coordKey(settler.coord);
+    const newCells = new Map(state.map.cells);
+    const cell = newCells.get(cellKey);
+    if (cell) {
+      newCells.set(cellKey, { ...cell, cityId });
+    }
+
+    // 移除殖民者单位
+    const newUnits = new Map(state.units);
+    newUnits.delete(settlerId);
+
+    // 更新已使用的城市名称
+    const newUsedNames = new Set(state.usedCityNames);
+    newUsedNames.add(cityName);
+
+    set({
+      cities: newCities,
+      units: newUnits,
+      map: { ...state.map, cells: newCells },
+      usedCityNames: newUsedNames,
+      selectedUnitId: null,
+    });
+
+    get().addLog(`建立了城市 ${cityName}！`);
+    return city;
+  },
+
+  // 选择城市
+  selectCity: (cityId: string | null) => {
+    set({ selectedCityId: cityId, selectedUnitId: null });
+  },
+
+  // 添加到生产队列
+  addToProductionQueue: (cityId: string, itemType: ProducableType) => {
+    const state = get();
+    const city = state.cities.get(cityId);
+    if (!city) return;
+
+    const item = PRODUCTION_ITEMS.find(i => i.type === itemType);
+    if (!item) return;
+
+    const queueItem = {
+      id: generateId(),
+      item,
+      progress: 0,
+    };
+
+    const newCities = new Map(state.cities);
+    newCities.set(cityId, {
+      ...city,
+      productionQueue: [...city.productionQueue, queueItem],
+    });
+
+    set({ cities: newCities });
+    get().addLog(`${city.name} 开始训练 ${item.name}`);
+  },
+
+  // 从生产队列移除
+  removeFromProductionQueue: (cityId: string, queueItemId: string) => {
+    const state = get();
+    const city = state.cities.get(cityId);
+    if (!city) return;
+
+    const newCities = new Map(state.cities);
+    newCities.set(cityId, {
+      ...city,
+      productionQueue: city.productionQueue.filter(item => item.id !== queueItemId),
+    });
+
+    set({ cities: newCities });
+  },
+
+  // 获取坐标上的城市
+  getCityAtCoord: (coord: HexCoord) => {
+    const key = coordKey(coord);
+    return Array.from(get().cities.values()).find(c => coordKey(c.coord) === key);
+  },
+
+  // 获取玩家的所有城市
+  getPlayerCities: (playerId: string) => {
+    return Array.from(get().cities.values()).filter(c => c.playerId === playerId);
   },
 
   // 获取当前玩家

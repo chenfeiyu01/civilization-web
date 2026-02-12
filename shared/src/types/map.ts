@@ -81,6 +81,7 @@ export interface HexCell {
   coord: HexCoord;
   terrain: TerrainType;
   unitId?: string;  // 占据该格子的单位ID
+  cityId?: string;  // 占据该格子的城市ID
 }
 
 // 地图数据

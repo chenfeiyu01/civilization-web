@@ -21,7 +21,10 @@ export default function HexCanvas({ onCellClick, onCellHover }: HexCanvasProps) 
   const {
     map,
     units,
+    cities,
+    players,
     selectedUnitId,
+    selectedCityId,
     hoveredCoord,
     getMovableCoords,
     getAttackableCoords,
@@ -52,6 +55,44 @@ export default function HexCanvas({ onCellClick, onCellHover }: HexCanvasProps) 
       highlightedCoords: hoveredCoord ? new Set([coordKey(hoveredCoord)]) : undefined,
     });
 
+    // 绘制城市
+    cities.forEach((city) => {
+      const center = hexToPixel(city.coord, config);
+      const player = players.find(p => p.id === city.playerId);
+      const isSelected = selectedCityId === city.id;
+
+      // 绘制城市背景
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, config.hexSize * 0.7, 0, Math.PI * 2);
+      ctx.fillStyle = player?.color || '#ffffff';
+      ctx.fill();
+
+      // 绘制边框（选中时高亮）
+      ctx.strokeStyle = isSelected ? '#FFD700' : (city.isCapital ? '#FFD700' : '#ffffff');
+      ctx.lineWidth = isSelected ? 4 : 3;
+      ctx.stroke();
+
+      // 绘制城市图标
+      ctx.font = `${config.hexSize * 0.8}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(city.isCapital ? '🏛️' : '🏠', center.x, center.y);
+
+      // 绘制城市名称
+      ctx.font = 'bold 12px Arial';
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 3;
+      ctx.strokeText(city.name, center.x, center.y + config.hexSize * 0.85);
+      ctx.fillText(city.name, center.x, center.y + config.hexSize * 0.85);
+
+      // 绘制人口
+      ctx.font = '10px Arial';
+      ctx.fillStyle = '#aaaaaa';
+      ctx.fillText(`👥${city.population}`, center.x, center.y + config.hexSize * 1.0);
+    });
+
     // 绘制单位
     units.forEach((unit) => {
       const center = hexToPixel(unit.coord, config);
@@ -62,7 +103,7 @@ export default function HexCanvas({ onCellClick, onCellHover }: HexCanvasProps) 
       ctx.arc(center.x, center.y, config.hexSize * 0.5, 0, Math.PI * 2);
 
       // 获取单位所属玩家的颜色
-      const player = useGameStore.getState().players.find(p => p.id === unit.playerId);
+      const player = players.find(p => p.id === unit.playerId);
       ctx.fillStyle = player?.color || '#ffffff';
       ctx.fill();
       ctx.strokeStyle = '#ffffff';
@@ -89,7 +130,7 @@ export default function HexCanvas({ onCellClick, onCellHover }: HexCanvasProps) 
       ctx.fillStyle = healthRatio > 0.5 ? '#22c55e' : healthRatio > 0.25 ? '#eab308' : '#ef4444';
       ctx.fillRect(barX, barY, barWidth * healthRatio, barHeight);
     });
-  }, [map, units, config, selectedUnitId, movableCoords, attackableCoords, hoveredCoord]);
+  }, [map, units, cities, players, config, selectedUnitId, selectedCityId, movableCoords, attackableCoords, hoveredCoord]);
 
   // 处理画布大小变化
   useEffect(() => {
